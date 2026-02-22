@@ -1,13 +1,13 @@
 {
-  "name": "scratch-render",
+  "name": "penguinmod-render-modded",
   "version": "0.1.0",
-  "description": "WebGL Renderer for Scratch 3.0",
-  "author": "Massachusetts Institute of Technology",
+  "description": "Modded PenguinMod WebGL Renderer",
+  "author": "DanielGamer139",
   "license": "BSD-3-Clause",
-  "homepage": "https://github.com/PenguinMod/penguinmod-render#readme",
+  "homepage": "https://github.com/DanielGamer139/PenguinMod-Render-Modded#readme",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/PenguinMod/penguinmod-render.git"
+    "url": "git+https://github.com/DanielGamer139/PenguinMod-Render-Modded.git"
   },
   "main": "./dist/node/scratch-render.js",
   "browser": "./src/index.js",
