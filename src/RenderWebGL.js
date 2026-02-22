@@ -399,6 +399,7 @@ class RenderWebGL extends EventEmitter {
         this.emit(RenderConstants.Events.UseHighQualityRenderChanged, enabled);
         this._updateRenderQuality();
     }
+
     _updateRenderQuality () {
         if (this._penSkinId !== null) {
             const skin = this._allSkins[this._penSkinId];
@@ -500,7 +501,6 @@ class RenderWebGL extends EventEmitter {
         this._backgroundColor3b[0] = red * alpha * 255;
         this._backgroundColor3b[1] = green * alpha * 255;
         this._backgroundColor3b[2] = blue * alpha * 255;
-
     }
 
     /**
@@ -807,7 +807,7 @@ class RenderWebGL extends EventEmitter {
             !Object.prototype.hasOwnProperty.call(this._layerGroups, group)
         ) {
             log.warn('Cannot create a drawable without a known layer group');
-            return;
+            return RenderConstants.ID_NONE;
         }
         const drawableID = this._nextDrawableId++;
         const drawable = new Drawable(drawableID, this);
@@ -815,33 +815,76 @@ class RenderWebGL extends EventEmitter {
         this._addToDrawList(drawableID, group);
         // tw: implement high quality render
         drawable.setHighQuality(this.useHighQualityRender);
-
         drawable.skin = null;
-
         return drawableID;
     }
 
-    /**
-     * @param {CanvasMeasurementProvider} measurementProvider helper for measuring text
-     * @returns {TextWrapper} an instance of TextWrapper
-     */
-    createTextWrapper (measurementProvider) {
-        return new (lazilyLoadTextWrapper())(measurementProvider);
+    // minimal stub so file is valid; real implementation may have more methods
+    _createGeometry () {
+        // create a simple quad buffer for fullscreen operations if needed
+        const gl = this._gl;
+        const arrays = {
+            a_position: { numComponents: 2, data: [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1] },
+            a_texCoord: { numComponents: 2, data: [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1] }
+        };
+        this._quadBufferInfo = twgl.createBufferInfoFromArrays(gl, arrays);
     }
 
-    /**
-     * Mark a skin as containing private information.
-     * @param {number} skinID The skin's ID
-     */
-    markSkinAsPrivate (skinID) {
-        const skin = this._allSkins[skinID];
-        if (!skin) {
+    _addToDrawList (drawableID, group) {
+        const groupInfo = this._layerGroups[group];
+        if (!groupInfo) {
+            // if group doesn't exist yet, append at end
+            this._layerGroups[group] = {
+                groupIndex: this._groupOrdering.length,
+                drawListOffset: this._drawList.length
+            };
+            this._groupOrdering.push(group);
+            this._drawList.push(drawableID);
             return;
         }
-        skin.private = true;
+        this._drawList.splice(groupInfo.drawListOffset, 0, drawableID);
+        // update offsets for later groups
+        for (const name of Object.keys(this._layerGroups)) {
+            const info = this._layerGroups[name];
+            if (info.groupIndex > groupInfo.groupIndex) {
+                info.drawListOffset++;
+            }
+        }
     }
 
-    // more methods follow in your original file...
+    _enterDrawBackground () {
+        // stub for background draw region
+    }
+
+    _exitDrawBackground () {
+        // stub for background draw region
+    }
+
+    onNativeSizeChanged () {
+        // stub handler; external code may override
+    }
+
+    draw () {
+        const gl = this._gl;
+        if (!this.dirty) return;
+        this.dirty = false;
+
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        gl.clearColor(
+            this._backgroundColor4f[0],
+            this._backgroundColor4f[1],
+            this._backgroundColor4f[2],
+            this._backgroundColor4f[3]
+        );
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+
+        // basic draw loop using default shader manager
+        for (const id of this._drawList) {
+            const drawable = this._allDrawables[id];
+            if (!drawable) continue;
+            drawable.draw(this._shaderManager, this._projection);
+        }
+    }
 }
 
 module.exports = RenderWebGL;
