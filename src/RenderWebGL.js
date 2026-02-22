@@ -909,6 +909,21 @@ class RenderWebGL extends EventEmitter {
         twgl.drawBufferInfo(gl, this._quadBufferInfo);
     }
 
+    _drawForegroundOnly () {
+        const gl = this._gl;
+
+        twgl.bindFramebufferInfo(gl, null);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+        for (const id of this._drawList) {
+            const drawable = this._allDrawables[id];
+            if (!drawable) continue;
+
+            // later you can filter here for specific groups/UI
+            drawable.draw(this._shaderManager, this._projection);
+        }
+    }
+
     draw () {
         const gl = this._gl;
         if (!this.dirty) return;
@@ -956,6 +971,9 @@ class RenderWebGL extends EventEmitter {
 
         // 4) present blurred scene to screen
         this._presentTextureToScreen(this._sceneTexture);
+
+        // 5) draw foreground sharp on top
+        this._drawForegroundOnly();
     }
 }
 
