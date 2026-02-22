@@ -1,5 +1,7 @@
-const EventEmitter = require('events');
+import blurHorizontalFrag from './shaders/blur-horizontal.frag';
+import blurVerticalFrag from './shaders/blur-vertical.frag';
 
+const EventEmitter = require('events');
 const hull = require('hull.js');
 const twgl = require('twgl.js');
 
