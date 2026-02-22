@@ -57,7 +57,7 @@ const MAX_EXTRACTED_DRAWABLE_DIMENSION = 2048;
 
 /**
  * Determines if the mask color is "close enough" (only test the 6 top bits for
- * each color).    These bit masks are what scratch 2 used to use, so we do the same.
+ * each color). These bit masks are what scratch 2 used to use, so we do the same.
  * @param {Uint8Array} a A color3b or color4b value.
  * @param {Uint8Array} b A color3b or color4b value.
  * @returns {boolean} If the colors match within the parameters.
@@ -71,12 +71,12 @@ const maskMatches = (a, b) =>
 
 /**
  * Determines if the given color is "close enough" (only test the 5 top bits for
- * red and green, 4 bits for blue).    These bit masks are what scratch 2 used to use,
+ * red and green, 4 bits for blue). These bit masks are what scratch 2 used to use,
  * so we do the same.
  * @param {Uint8Array} a A color3b or color4b value.
  * @param {Uint8Array} b A color3b or color4b value / or a larger array when used with offsets
  * @param {number} offset An offset into the `b` array, which lets you use a larger array to test
- *                                    multiple values at the same time.
+ * multiple values at the same time.
  * @returns {boolean} If the colors match within the parameters.
  */
 const colorMatches = (a, b, offset) =>
@@ -152,9 +152,6 @@ class RenderWebGL extends EventEmitter {
             xrCompatible: true,
             powerPreference: RenderWebGL.powerPreference
         };
-        // getWebGLContext = try WebGL 1.0 only
-        // getContext = try WebGL 2.0 and if that doesn't work, try WebGL 1.0
-        // getWebGLContext || getContext = try WebGL 1.0 and if that doesn't work, try WebGL 2.0
         return (
             twgl.getContext(canvas, contextAttribs) ||
             twgl.getWebGLContext(canvas, contextAttribs)
@@ -164,18 +161,8 @@ class RenderWebGL extends EventEmitter {
     /**
      * Create a renderer for drawing Scratch sprites to a canvas using WebGL.
      * Coordinates will default to Scratch 2.0 values if unspecified.
-     * The stage's "native" size will be calculated from the these coordinates.
-     * For example, the defaults result in a native size of 480x360.
-     * Queries such as "touching color?" will always execute at the native size.
-     * @see RenderWebGL#setStageSize
-     * @see RenderWebGL#resize
      * @param {canvas} canvas The canvas to draw onto.
-     * @param {int} [xLeft=-240] The x-coordinate of the left edge.
-     * @param {int} [xRight=240] The x-coordinate of the right edge.
-     * @param {int} [yBottom=-180] The y-coordinate of the bottom edge.
-     * @param {int} [yTop=180] The y-coordinate of the top edge.
      * @constructor
-     * @listens RenderWebGL#event:NativeSizeChanged
      */
     constructor (canvas, xLeft, xRight, yBottom, yTop) {
         super();
@@ -206,14 +193,9 @@ class RenderWebGL extends EventEmitter {
         this._groupOrdering = [];
 
         /**
-         * @typedef LayerGroup
-         * @property {int} groupIndex The relative position of this layer group in the group ordering
-         * @property {int} drawListOffset The absolute position of this layer group in the draw list
-         * This number gets updated as drawables get added to or deleted from the draw list.
+         * Map of group name to layer group
+         * @type {Object.<string, {groupIndex:number, drawListOffset:number}>}
          */
-
-        // Map of group name to layer group
-        /** @type {Object.<string, LayerGroup>} */
         this._layerGroups = {};
 
         /** @type {int} */
@@ -250,15 +232,13 @@ class RenderWebGL extends EventEmitter {
             exit: () => this._exitDrawBackground()
         };
 
-        /** @type {Array.<snapshotCallback>} */
+        /** @type {Array.<Function>} */
         this._snapshotCallbacks = [];
 
         /** @type {Array<number>} */
-        // Don't set this directly-- use setBackgroundColor so it stays in sync with _backgroundColor3b
         this._backgroundColor4f = [0, 0, 0, 1];
 
         /** @type {Uint8ClampedArray} */
-        // Don't set this directly-- use setBackgroundColor so it stays in sync with _backgroundColor4f
         this._backgroundColor3b = new Uint8ClampedArray(3);
 
         // tw: track id of pen skin
@@ -278,6 +258,14 @@ class RenderWebGL extends EventEmitter {
         this.offscreenTouching = false;
 
         this.dirty = true;
+
+        // offscreen targets for blur
+        this._offscreenWidth = 0;
+        this._offscreenHeight = 0;
+        this._sceneFBO = null;
+        this._sceneTexture = null;
+        this._tempFBO = null;
+        this._tempTexture = null;
 
         /**
          * Element that contains all overlays.
@@ -307,71 +295,23 @@ class RenderWebGL extends EventEmitter {
         this.resize(this._nativeSize[0], this._nativeSize[1]);
 
         gl.disable(gl.DEPTH_TEST);
-        /** @todo disable when no partial transparency? */
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
 
-        /**
-         * Whether or not the renderer should be drawing to an XR layer.
-         * Used for the Virtual Reality extension.
-         */
         this.xrEnabled = false;
-
-        /**
-         * Whether or not the renderer should be drawing the image split for VR screens.
-         * Used for the Virtual Reality extension.
-         */
         this.xrSplitting = false;
-
-        /**
-         * An offset where the XR splitting will shift closer to the center.
-         * Used for the Virtual Reality extension.
-         */
         this.xrSplitOffset = 0;
-
-        /**
-         * The layer that should be drawn to.
-         * Used for the Virtual Reality extension.
-         */
         this.xrLayer = null;
 
-        /**
-         * set to true by default as this is still expieremental
-         */
         this.renderOffscreen = true;
 
-        /**
-         * Whether projects should be able to access the contents of private skins such as webcams.
-         * If set to false, routines such as isTouchingColor will ignore private skins.
-         * Private skins will still be rendered on the canvas regardless of this setting.
-         * This is set to true by default for compatibility with vanilla Scratch.
-         * @type {boolean}
-         */
         this.allowPrivateSkinAccess = true;
 
-        /**
-         * Suggested maximum texture size in texels. This is not a hard limit.
-         * Defualt value is same as Scratch's SVGSkin max.
-         * @type {number}
-         */
         this.maxTextureDimension = 2048;
 
-        /**
-         * Custom fonts, used by SVGs. Maps font families to their @font-face statement.
-         * Do not modify directly -- use {@link setCustomFonts}.
-         * @type {Record<string, string>}
-         */
         this.customFonts = {};
-
-        /**
-         * <style> element used for custom fonts.
-         * @type {HTMLStyleElement|null}
-         */
         this._customFontStyles = null;
 
-        /**
-         * Export internals for third-party extensions.
-         */
         this.exports = {
             twgl,
             SVGRenderer,
@@ -465,8 +405,6 @@ class RenderWebGL extends EventEmitter {
         const newWidth = pixelsWide * pixelRatio;
         const newHeight = pixelsTall * pixelRatio;
 
-        // Certain operations, such as moving the color picker, call `resize` once per frame, even though the canvas
-        // size doesn't change. To avoid unnecessary canvas updates, check that we *really* need to resize the canvas.
         if (canvas.width !== newWidth || canvas.height !== newHeight) {
             canvas.width = newWidth;
             canvas.height = newHeight;
@@ -474,7 +412,8 @@ class RenderWebGL extends EventEmitter {
             this._updateRenderQuality();
             this._updateOverlays();
 
-            // Resizing the canvas causes it to be cleared, so redraw it.
+            this._resizeOffscreenTargets();
+
             this.dirty = true;
             this.draw();
         }
@@ -764,7 +703,6 @@ class RenderWebGL extends EventEmitter {
     /**
      * Update a skin using the text costume svg creator.
      * @param {!object} textState the state to apply.
-     * @param {!boolean} pointsLeft - which side the bubble is pointing.
      * @returns {number} the the skin id
      */
     updateTextCostumeSkin (textState) {
@@ -781,7 +719,7 @@ class RenderWebGL extends EventEmitter {
         const skinId = this._nextSkinId++;
         const newSkin = new TextCostumeSkin(skinId, this);
         this._allSkins[skinId] = newSkin;
-        newSkin.setTextAndStyle(textState); // this._reskin(skinId, newSkin); // this is erroring- might be necessary?
+        newSkin.setTextAndStyle(textState);
 
         return skinId;
     }
@@ -813,27 +751,87 @@ class RenderWebGL extends EventEmitter {
         const drawable = new Drawable(drawableID, this);
         this._allDrawables[drawableID] = drawable;
         this._addToDrawList(drawableID, group);
-        // tw: implement high quality render
         drawable.setHighQuality(this.useHighQualityRender);
         drawable.skin = null;
         return drawableID;
     }
 
-    // minimal stub so file is valid; real implementation may have more methods
+    // ---------- geometry + blur pipeline ----------
+
     _createGeometry () {
-        // create a simple quad buffer for fullscreen operations if needed
         const gl = this._gl;
         const arrays = {
-            a_position: { numComponents: 2, data: [-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1] },
-            a_texCoord: { numComponents: 2, data: [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1] }
+            a_position: {
+                numComponents: 2,
+                data: [
+                    -1, -1,
+                    1, -1,
+                    -1, 1,
+                    -1, 1,
+                    1, -1,
+                    1, 1
+                ]
+            },
+            a_texCoord: {
+                numComponents: 2,
+                data: [
+                    0, 0,
+                    1, 0,
+                    0, 1,
+                    0, 1,
+                    1, 0,
+                    1, 1
+                ]
+            }
         };
         this._quadBufferInfo = twgl.createBufferInfoFromArrays(gl, arrays);
+    }
+
+    _createOffscreenTargets () {
+        const gl = this._gl;
+        const width = this.canvas.width;
+        const height = this.canvas.height;
+
+        if (!width || !height) return;
+
+        this._offscreenWidth = width;
+        this._offscreenHeight = height;
+
+        const texOpts = {
+            min: gl.LINEAR,
+            mag: gl.LINEAR,
+            wrap: gl.CLAMP_TO_EDGE
+        };
+
+        if (this._sceneTexture) gl.deleteTexture(this._sceneTexture);
+        if (this._tempTexture) gl.deleteTexture(this._tempTexture);
+        if (this._sceneFBO) gl.deleteFramebuffer(this._sceneFBO);
+        if (this._tempFBO) gl.deleteFramebuffer(this._tempFBO);
+
+        this._sceneTexture = twgl.createTexture(gl, {
+            width,
+            height,
+            ...texOpts
+        });
+        this._tempTexture = twgl.createTexture(gl, {
+            width,
+            height,
+            ...texOpts
+        });
+
+        this._sceneFBO = twgl.createFramebufferInfo(gl, [{attachment: this._sceneTexture}], width, height);
+        this._tempFBO = twgl.createFramebufferInfo(gl, [{attachment: this._tempTexture}], width, height);
+    }
+
+    _resizeOffscreenTargets () {
+        if (!this._sceneFBO || this._offscreenWidth !== this.canvas.width || this._offscreenHeight !== this.canvas.height) {
+            this._createOffscreenTargets();
+        }
     }
 
     _addToDrawList (drawableID, group) {
         const groupInfo = this._layerGroups[group];
         if (!groupInfo) {
-            // if group doesn't exist yet, append at end
             this._layerGroups[group] = {
                 groupIndex: this._groupOrdering.length,
                 drawListOffset: this._drawList.length
@@ -843,7 +841,6 @@ class RenderWebGL extends EventEmitter {
             return;
         }
         this._drawList.splice(groupInfo.drawListOffset, 0, drawableID);
-        // update offsets for later groups
         for (const name of Object.keys(this._layerGroups)) {
             const info = this._layerGroups[name];
             if (info.groupIndex > groupInfo.groupIndex) {
@@ -853,23 +850,21 @@ class RenderWebGL extends EventEmitter {
     }
 
     _enterDrawBackground () {
-        // stub for background draw region
+        // hook if you want special background handling
     }
 
     _exitDrawBackground () {
-        // stub for background draw region
+        // hook if you want special background handling
     }
 
     onNativeSizeChanged () {
-        // stub handler; external code may override
+        // external code may override
     }
 
-    draw () {
+    _renderSceneToFramebuffer (framebufferInfo) {
         const gl = this._gl;
-        if (!this.dirty) return;
-        this.dirty = false;
-
-        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        twgl.bindFramebufferInfo(gl, framebufferInfo);
+        gl.viewport(0, 0, this._offscreenWidth, this._offscreenHeight);
         gl.clearColor(
             this._backgroundColor4f[0],
             this._backgroundColor4f[1],
@@ -878,13 +873,97 @@ class RenderWebGL extends EventEmitter {
         );
         gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
-        // basic draw loop using default shader manager
         for (const id of this._drawList) {
             const drawable = this._allDrawables[id];
             if (!drawable) continue;
             drawable.draw(this._shaderManager, this._projection);
         }
     }
+
+    _blurPass (sourceTexture, targetFBO, programInfo, texelSize) {
+        const gl = this._gl;
+        twgl.bindFramebufferInfo(gl, targetFBO);
+        gl.viewport(0, 0, this._offscreenWidth, this._offscreenHeight);
+
+        gl.useProgram(programInfo.program);
+        twgl.setBuffersAndAttributes(gl, programInfo, this._quadBufferInfo);
+        twgl.setUniforms(programInfo, {
+            u_texture: sourceTexture,
+            u_texelSize: texelSize
+        });
+        twgl.drawBufferInfo(gl, this._quadBufferInfo);
+    }
+
+    _presentTextureToScreen (texture) {
+        const gl = this._gl;
+        twgl.bindFramebufferInfo(gl, null);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+
+        const programInfo = this._blurVerticalProgram; // reuse simple textured quad program
+        gl.useProgram(programInfo.program);
+        twgl.setBuffersAndAttributes(gl, programInfo, this._quadBufferInfo);
+        twgl.setUniforms(programInfo, {
+            u_texture: texture,
+            u_texelSize: [0, 0] // not used in final pass if shader ignores it
+        });
+        twgl.drawBufferInfo(gl, this._quadBufferInfo);
+    }
+
+    draw () {
+        const gl = this._gl;
+        if (!this.dirty) return;
+        this.dirty = false;
+
+        this._resizeOffscreenTargets();
+        if (!this._sceneFBO) {
+            // fallback: no offscreen, just draw normally
+            gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            gl.clearColor(
+                this._backgroundColor4f[0],
+                this._backgroundColor4f[1],
+                this._backgroundColor4f[2],
+                this._backgroundColor4f[3]
+            );
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+            for (const id of this._drawList) {
+                const drawable = this._allDrawables[id];
+                if (!drawable) continue;
+                drawable.draw(this._shaderManager, this._projection);
+            }
+            return;
+        }
+
+        // 1) render scene to offscreen texture
+        this._renderSceneToFramebuffer(this._sceneFBO);
+
+        // 2) horizontal blur: sceneTexture -> tempTexture
+        const texelX = 1 / this._offscreenWidth;
+        const texelY = 1 / this._offscreenHeight;
+        this._blurPass(
+            this._sceneTexture,
+            this._tempFBO,
+            this._blurHorizontalProgram,
+            [texelX, 0]
+        );
+
+        // 3) vertical blur: tempTexture -> sceneTexture
+        this._blurPass(
+            this._tempTexture,
+            this._sceneFBO,
+            this._blurVerticalProgram,
+            [0, texelY]
+        );
+
+        // 4) present blurred scene to screen
+        this._presentTextureToScreen(this._sceneTexture);
+    }
 }
+
+// simple enum stub if not already defined elsewhere
+RenderWebGL.UseGpuModes = {
+    Automatic: 0,
+    ForceCPU: 1,
+    ForceGPU: 2
+};
 
 module.exports = RenderWebGL;
